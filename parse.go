@@ -1,5 +1,10 @@
 package rut
 
+import (
+	"regexp"
+	"strings"
+)
+
 const (
 	minRutLength = 8 // 7-digit body + verifier
 	maxRutLength = 9 // 8-digit body + verifier
@@ -59,4 +64,30 @@ func isDigits(s string) bool {
 		}
 	}
 	return len(s) > 0
+}
+
+// rutShape is the union of the three canonical shapes: compact (123456785),
+// compact with hyphen (12345678-5) and dotted (12.345.678-5). It allows a
+// leading zero on purpose; parseRutLike rejects it explicitly.
+var rutShape = regexp.MustCompile(`^(?:[0-9]{7,8}-?[0-9kK]|[0-9]{1,3}\.[0-9]{3}\.[0-9]{3}-[0-9kK])$`)
+
+// parseRutLike is the canonical parser used by IsRutLike. After trimming
+// JavaScript whitespace the input must be one of the three canonical shapes,
+// without leading zeros.
+func parseRutLike(s string) (body, verifier string, ok bool) {
+	if !isBounded(s) {
+		return "", "", false
+	}
+	input := strings.TrimFunc(s, isJSSpace)
+	if input == "" || !rutShape.MatchString(input) {
+		return "", "", false
+	}
+	// Reject leading-zero padding: a canonical RUT has none, and padding forms
+	// an unbounded family of strings for one RUT (12345678 = 012345678 = …)
+	// that must not slip past an identity check. Every accepted shape starts
+	// with the body's top digit, so a leading '0' is always padding.
+	if input[0] == '0' {
+		return "", "", false
+	}
+	return splitCleanRut(normalizeRutValue(input))
 }
