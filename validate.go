@@ -33,7 +33,7 @@ func WithStrict(strict bool) ValidateOption {
 // Unicode spaces included (U+00A0, U+FEFF, U+3000…), so one RUT can be
 // written in several accepted ways: Validate answers "is this a valid RUT?",
 // not "is this the one spelling of it". To store or compare RUTs, use the
-// output of Clean.
+// output of Clean or Format.
 func Validate(rut string, opts ...ValidateOption) bool {
 	var o validateOptions
 	for _, opt := range opts {
