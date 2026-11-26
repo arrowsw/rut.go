@@ -25,3 +25,23 @@ func GetVerifier(rut string) (string, error) {
 	}
 	return verifier, nil
 }
+
+// DecomposedRut is a RUT split into its body and its verifier.
+type DecomposedRut struct {
+	Body     string // 7 or 8 digits, without leading zeros
+	Verifier string // "0"–"9" or "K"
+}
+
+// Decompose splits a RUT into body and verifier: "12.345.678-5" gives
+// DecomposedRut{Body: "12345678", Verifier: "5"}.
+//
+// It normalizes the input exactly like Clean and returns ErrInvalidRut, with
+// the zero DecomposedRut, in the same cases. It does not check the Modulo 11
+// verifier.
+func Decompose(rut string) (DecomposedRut, error) {
+	body, verifier, ok := parseLenient(rut)
+	if !ok {
+		return DecomposedRut{}, ErrInvalidRut
+	}
+	return DecomposedRut{Body: body, Verifier: verifier}, nil
+}

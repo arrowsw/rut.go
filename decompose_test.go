@@ -113,3 +113,46 @@ func TestGetBodyPlusGetVerifierIsClean(t *testing.T) {
 		}
 	}
 }
+
+func TestDecomposeSplitsBodyAndVerifier(t *testing.T) {
+	cases := []struct {
+		in   string
+		want DecomposedRut
+	}{
+		{"18.972.631-7", DecomposedRut{Body: "18972631", Verifier: "7"}},
+		{"9.068.826-K", DecomposedRut{Body: "9068826", Verifier: "K"}},
+		{"14.625.621-k", DecomposedRut{Body: "14625621", Verifier: "K"}},
+		{"18.264.159-0", DecomposedRut{Body: "18264159", Verifier: "0"}},
+	}
+	for _, c := range cases {
+		got, err := Decompose(c.in)
+		if err != nil || got != c.want {
+			t.Errorf("Decompose(%q) = %+v, %v; want %+v, nil", c.in, got, err, c.want)
+		}
+	}
+}
+
+func TestDecomposeRejectsInvalidInput(t *testing.T) {
+	for _, in := range []string{"", "123", "invalid", "not-a-rut", "12345678901"} {
+		got, err := Decompose(in)
+		if got != (DecomposedRut{}) {
+			t.Errorf("Decompose(%q) = %+v, want the zero value", in, got)
+		}
+		wantInvalid(t, "Decompose("+in+")", err)
+	}
+}
+
+func TestDecomposeAgreesWithGetBodyAndGetVerifier(t *testing.T) {
+	for _, in := range []string{"18.972.631-7", "9.068.826-K", "14.625.621-k", "  18.972.631-7  ", "009.068.826-K"} {
+		d, err := Decompose(in)
+		if err != nil {
+			t.Fatalf("Decompose(%q): %v", in, err)
+		}
+		body, _ := GetBody(in)
+		verifier, _ := GetVerifier(in)
+		cleaned, _ := Clean(in)
+		if d.Body != body || d.Verifier != verifier || d.Body+d.Verifier != cleaned {
+			t.Errorf("Decompose(%q) = %+v; GetBody %q, GetVerifier %q, Clean %q", in, d, body, verifier, cleaned)
+		}
+	}
+}
