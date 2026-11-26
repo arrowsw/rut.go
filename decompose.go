@@ -12,3 +12,16 @@ func GetBody(rut string) (string, error) {
 	}
 	return body, nil
 }
+
+// GetVerifier returns the verifier of a RUT, its last character, always
+// uppercase: "9.068.826-k" gives "K".
+//
+// It normalizes the input exactly like Clean and returns ErrInvalidRut in the
+// same cases. It does not check that the verifier is the right one.
+func GetVerifier(rut string) (string, error) {
+	_, verifier, ok := parseLenient(rut)
+	if !ok {
+		return "", ErrInvalidRut
+	}
+	return verifier, nil
+}
