@@ -1,0 +1,12 @@
+# Test and profiling output
+*.out
+*.test
+*.prof
+
+# Fuzzing cache written by `go test -fuzz` outside testdata/
+/fuzz-cache/
+
+# Golden-vector generator dependencies
+/scripts/golden/node_modules/
+
+.DS_Store
