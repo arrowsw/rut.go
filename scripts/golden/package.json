@@ -1,0 +1,13 @@
+{
+  "name": "rut-go-golden",
+  "private": true,
+  "type": "module",
+  "description": "Generates testdata/golden.json.gz from the pinned rut.ts release.",
+  "scripts": {
+    "generate": "node generate.mjs",
+    "check": "node generate.mjs --check"
+  },
+  "devDependencies": {
+    "rut.ts": "5.1.2"
+  }
+}

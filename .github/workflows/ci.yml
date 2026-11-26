@@ -43,3 +43,27 @@ jobs:
 
       - name: Tests (race detector)
         run: go test -race -count=1 ./...
+
+  golden:
+    name: golden fixture matches rut.ts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: scripts/golden/package-lock.json
+
+      - name: Install the pinned rut.ts
+        working-directory: scripts/golden
+        run: npm ci --ignore-scripts
+
+      # Regenerates the fixture from the pinned rut.ts and fails if it differs
+      # from testdata/golden.json.gz, which the Go tests replay.
+      - name: Check the fixture is up to date
+        working-directory: scripts/golden
+        run: node generate.mjs --check
