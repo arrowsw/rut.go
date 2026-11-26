@@ -78,3 +78,154 @@ func TestIsRutLikeCapsInputAt64UTF16Units(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateAcceptsValidRuts(t *testing.T) {
+	cases := []struct{ name, in string }{
+		{"dotted", "12.345.678-5"},
+		{"compact with hyphen", "12345678-5"},
+		{"compact", "123456785"},
+		{"dotted, 7-digit body", "1.234.567-4"},
+		{"compact with hyphen, 7-digit body", "1234567-4"},
+		{"compact, 7-digit body", "12345674"},
+		{"uppercase K", "14.625.621-K"},
+		{"lowercase k", "14.625.621-k"},
+		{"compact uppercase K", "14625621K"},
+		{"compact lowercase k", "14625621k"},
+		{"verifier 0", "18.264.950-3"},
+		{"verifier 0 (check digit 11)", "10.000.004-0"},
+		{"minimum 8-digit body", "10.000.000-8"},
+		{"floor of the range", "1000000-9"},
+		{"ceiling of the range", "99.999.999-9"},
+		{"surrounding spaces", "  12.345.678-5  "},
+		{"tab and newline", "\t12.345.678-5\n"},
+		{"compact with surrounding spaces", "  123456785  "},
+		{"K with surrounding whitespace", "\n14.625.621-K\t"},
+		{"BOM U+FEFF", "\ufeff12.345.678-5"},
+		{"ideographic space U+3000", "12.345.678-5\u3000"},
+		{"no-break spaces U+00A0", "\u00a012345678-5\u00a0"},
+		{"whitespace padding up to 64 units", strings.Repeat(" ", 55) + "123456785"},
+	}
+	for _, c := range cases {
+		if !Validate(c.in) {
+			t.Errorf("%s: Validate(%q) = false, want true", c.name, c.in)
+		}
+	}
+}
+
+func TestValidateRejectsInvalidRuts(t *testing.T) {
+	cases := []struct{ name, in string }{
+		{"wrong verifier", "18.972.631-8"},
+		{"wrong verifier (K)", "23.478.522-K"},
+		{"wrong verifier (0 instead of 5)", "12.345.678-0"},
+		{"letters", "invalid"},
+		{"letters only", "abcdefghi"},
+		{"too few digits with dots", "1.1.1-1"},
+		{"empty", ""},
+		{"special characters", "12#34%56&789K"},
+		{"comma grouping", "12,345,678-5"},
+		{"non-canonical grouping", "12.345678-5"},
+		{"non-canonical grouping", "12345.678-5"},
+		{"dotted without hyphen", "12.345.6785"},
+		{"dotted without hyphen, 7-digit body", "1.234.5674"},
+		{"every digit dotted", "1.2.3.4.5.6.7.8-5"},
+		{"internal whitespace", "12 345 678 5"},
+		{"leading K", "K2345678-5"},
+		{"K in the middle", "1234K678-5"},
+		{"two K", "1234567K-K"},
+		{"two leading K", "KK345678-5"},
+		{"too short", "123"},
+		{"7 characters", "1234567"},
+		{"too long", "12345678901"},
+		{"one above the ceiling", "100000000-7"},
+		{"leading zeros, dotted", "009.068.826-K"},
+		{"leading zeros, compact", "0009068826K"},
+		{"leading zero, dotted 8-digit body", "018.972.631-7"},
+		{"leading zeros, compact 7-digit body", "00012345674"},
+		{"single leading zero on a 7-digit body", "01234567-4"},
+		{"single leading zero, compact", "0123456785"},
+		{"leading zero on a valid RUT", "010.000.002-4"},
+		{"leading garbage, compact", "xx123456785"},
+		{"trailing garbage, compact", "123456785xx"},
+		{"leading garbage, hyphen", "xx12345678-5"},
+		{"trailing garbage, hyphen", "12345678-5xx"},
+		{"leading garbage, dotted", "xx12.345.678-5"},
+		{"trailing garbage, dotted", "12.345.678-5xx"},
+		{"65 units", strings.Repeat(" ", 56) + "123456785"},
+		{"far over the cap", strings.Repeat("0", 128) + "x"},
+		{"far over the cap", strings.Repeat("1", 20000)},
+		{"adversarial 100k input", strings.Repeat("0", 100000) + "x"},
+		{"whitespace only", "   "},
+		{"tab and newline only", "\t\n"},
+		{"letters with whitespace", "  invalid  "},
+		{"wrong verifier with whitespace", "  12.345.678-0  "},
+		{"Devanagari digits", "\u0967\u0968\u0969\u096a\u096b\u096c\u096d\u096e-\u096b"},
+		{"full-width digits", "１２３４５６７８-５"},
+		{"right-to-left override", "\u202e12345678-5"},
+		{"trailing zero-width space", "12345678-5\u200b"},
+		{"Cyrillic K", "14.625.621-\u041a"},
+		{"NEL U+0085 is not trimmed", "12.345.678-5\u0085"},
+	}
+	for _, c := range cases {
+		if Validate(c.in) {
+			t.Errorf("%s: Validate(%q) = true, want false", c.name, truncate(c.in))
+		}
+	}
+}
+
+func TestValidateRejectsBodiesShorterThan7DigitsEvenWithTheRightVerifier(t *testing.T) {
+	// Every verifier here is correct for its body: only the body-length rule
+	// can reject these.
+	for _, in := range []string{"999999-K", "999.999-K", "999999K", "100000-4", "1000-6", "1-9"} {
+		if Validate(in) || Validate(in, WithStrict(true)) {
+			t.Errorf("Validate(%q) = true, want false", in)
+		}
+	}
+}
+
+func TestValidateStrictRejectsRepeatedDigitPlaceholders(t *testing.T) {
+	for _, in := range []string{"11.111.111-1", "22.222.222-2", "33.333.333-3", "8.888.888-K", "8888888K"} {
+		if Validate(in, WithStrict(true)) {
+			t.Errorf("Validate(%q, WithStrict(true)) = true, want false", in)
+		}
+		if !Validate(in) || !Validate(in, WithStrict(false)) {
+			t.Errorf("Validate(%q) without strict = false, want true", in)
+		}
+	}
+	for _, in := range []string{"12.345.678-5", "18.972.631-7"} {
+		if !Validate(in, WithStrict(true)) {
+			t.Errorf("Validate(%q, WithStrict(true)) = false, want true", in)
+		}
+	}
+}
+
+func TestValidateLastOptionWins(t *testing.T) {
+	if Validate("11.111.111-1", WithStrict(false), WithStrict(true)) {
+		t.Error("the later WithStrict(true) should win")
+	}
+	if !Validate("11.111.111-1", WithStrict(true), WithStrict(false)) {
+		t.Error("the later WithStrict(false) should win")
+	}
+}
+
+func truncate(s string) string {
+	if len(s) > 40 {
+		return s[:40] + "…"
+	}
+	return s
+}
+
+func TestValidateIgnoresNilOptions(t *testing.T) {
+	if !Validate("12.345.678-5", nil) {
+		t.Error("Validate with a nil option = false, want true")
+	}
+}
+
+func TestCleanThenValidateAcceptsMessyInput(t *testing.T) {
+	// The recipe documented on Clean: normalize first, then prove Modulo 11.
+	for _, in := range []string{"009.068.826-K", "RUT: 12.345.678-5", "12 345 678 5"} {
+		c, err := Clean(in)
+		if err != nil || !Validate(c) {
+			t.Errorf("Validate(Clean(%q)) = false (%q, %v), want true", in, c, err)
+		}
+	}
+}

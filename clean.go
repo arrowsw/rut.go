@@ -8,7 +8,12 @@ package rut
 // and uppercases k. The result must have a 7- or 8-digit body followed by one
 // verifier character, otherwise Clean returns ErrInvalidRut.
 //
-// Clean does not check the Modulo 11 verifier.
+// Clean does not check the Modulo 11 verifier. To accept messy input as a real
+// RUT, follow it with Validate:
+//
+//	if c, err := rut.Clean(raw); err == nil && rut.Validate(c) {
+//		// c is a valid RUT in compact form
+//	}
 func Clean(rut string) (string, error) {
 	body, verifier, ok := parseLenient(rut)
 	if !ok {

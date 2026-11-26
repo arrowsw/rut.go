@@ -71,9 +71,9 @@ func isDigits(s string) bool {
 // leading zero on purpose; parseRutLike rejects it explicitly.
 var rutShape = regexp.MustCompile(`^(?:[0-9]{7,8}-?[0-9kK]|[0-9]{1,3}\.[0-9]{3}\.[0-9]{3}-[0-9kK])$`)
 
-// parseRutLike is the canonical parser used by IsRutLike. After trimming
-// JavaScript whitespace the input must be one of the three canonical shapes,
-// without leading zeros.
+// parseRutLike is the canonical parser shared by the acceptance predicates
+// (IsRutLike, Validate). After trimming JavaScript whitespace the input must
+// be one of the three canonical shapes, without leading zeros.
 func parseRutLike(s string) (body, verifier string, ok bool) {
 	if !isBounded(s) {
 		return "", "", false
