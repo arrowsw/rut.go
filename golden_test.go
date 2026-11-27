@@ -5,37 +5,60 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"reflect"
+	"sync"
 	"testing"
 )
 
 // golden is testdata/golden.json.gz: what the pinned rut.ts release answers
-// for 44,000 inputs and 8,000 pairs. scripts/golden/generate.mjs writes it;
-// CI checks that it is up to date.
+// for 48,537 inputs and 11,000 pairs, its RUT_PATTERN, and what its generate()
+// returns in 3,000 calls fed a fixed stream of random draws.
+// scripts/golden/generate.mjs writes it; CI checks that it is up to date.
 type golden struct {
-	RutTs string  `json:"rutTs"`
-	Cases [][]any `json:"cases"` // input, clean, calculateVerifier, format, formatNoDots, mask, flags
-	Pairs [][]any `json:"pairs"` // a, b, flags
+	RutTs    string            `json:"rutTs"`
+	Cases    [][]any           `json:"cases"` // input, clean, calculateVerifier, format, formatNoDots, mask, flags
+	Pairs    [][]any           `json:"pairs"` // a, b, flags
+	Patterns map[string]string `json:"patterns"`
+	Generate struct {
+		Draws []uint32 `json:"draws"`
+		Calls [][]any  `json:"calls"` // bodyLength, format, count, result
+	} `json:"generate"`
 }
+
+var (
+	goldenOnce sync.Once
+	goldenData golden
+	goldenErr  error
+)
 
 func loadGolden(t *testing.T) golden {
 	t.Helper()
-	f, err := os.Open("testdata/golden.json.gz")
+	goldenOnce.Do(func() { goldenData, goldenErr = readGolden("testdata/golden.json.gz") })
+	if goldenErr != nil {
+		t.Fatal(goldenErr)
+	}
+	return goldenData
+}
+
+func readGolden(path string) (golden, error) {
+	var g golden
+	f, err := os.Open(path)
 	if err != nil {
-		t.Fatal(err)
+		return g, err
 	}
 	defer f.Close()
 	zr, err := gzip.NewReader(f)
 	if err != nil {
-		t.Fatal(err)
+		return g, err
 	}
-	var g golden
 	if err := json.NewDecoder(zr).Decode(&g); err != nil {
-		t.Fatal(err)
+		return g, err
 	}
-	if len(g.Cases) == 0 || len(g.Pairs) == 0 {
-		t.Fatal("golden fixture is empty")
+	if len(g.Cases) == 0 || len(g.Pairs) == 0 || len(g.Patterns) == 0 ||
+		len(g.Generate.Draws) == 0 || len(g.Generate.Calls) == 0 {
+		return g, fmt.Errorf("%s is missing a section", path)
 	}
-	return g
+	return g, nil
 }
 
 // result renders a Go result the way the fixture stores a rut.ts one: the
@@ -107,5 +130,63 @@ func TestGoldenMatchesRutTs(t *testing.T) {
 
 	for fn, n := range failures {
 		t.Errorf("%s: %d mismatches with rut.ts", fn, n)
+	}
+}
+
+func TestGoldenPatternsMatchRutTs(t *testing.T) {
+	g := loadGolden(t)
+	want := map[string]string{
+		"any":     PatternAny,
+		"compact": PatternCompact,
+		"hyphen":  PatternHyphen,
+		"dotted":  PatternDotted,
+	}
+	if !reflect.DeepEqual(g.Patterns, want) {
+		t.Errorf("RUT_PATTERN in rut.ts %s is %q; the Pattern constants are %q", g.RutTs, g.Patterns, want)
+	}
+}
+
+func TestGoldenGenerateMatchesRutTs(t *testing.T) {
+	g := loadGolden(t)
+	src := draws(g.Generate.Draws...)
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Go needed more than the %d random draws rut.ts used: %v", len(g.Generate.Draws), r)
+		}
+	}()
+
+	failures := 0
+	for _, c := range g.Generate.Calls {
+		var opts []GenerateOption
+		if c[0] != nil {
+			opts = append(opts, WithBodyLength(int(c[0].(float64))))
+		}
+		if c[1] != nil {
+			opts = append(opts, WithFormat(GenerateFormat(c[1].(string))))
+		}
+		o := collectGenerateOptions(opts)
+
+		var got any
+		if c[2] == nil {
+			got = generateOne(src, o)
+		} else {
+			list := []any{}
+			for _, rut := range generateN(src, int(c[2].(float64)), o) {
+				list = append(list, rut)
+			}
+			got = list
+		}
+		if !reflect.DeepEqual(got, c[3]) {
+			if failures < 5 {
+				t.Errorf("generate(bodyLength %v, format %v, count %v) = %v, rut.ts gives %v", c[0], c[1], c[2], got, c[3])
+			}
+			failures++
+		}
+	}
+	if failures > 0 {
+		t.Errorf("generate: %d of %d calls differ from rut.ts", failures, len(g.Generate.Calls))
+	}
+	if src.Len() != 0 {
+		t.Errorf("Go used %d fewer random draws than rut.ts", src.Len()/4)
 	}
 }

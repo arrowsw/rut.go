@@ -2,7 +2,7 @@
 
 Handle Chilean RUT values in Go: validate, clean, format, mask, compare and generate them.
 
-A faithful port of [rut.ts](https://github.com/arrowsw/rut.ts). Every function gives the same answer as rut.ts 5.1.2 for the same input, and the test suite proves it against more than 50,000 cases taken from rut.ts itself. No dependencies.
+A faithful port of [rut.ts](https://github.com/arrowsw/rut.ts). Every function gives the same answer as rut.ts 5.1.2 for the same input, and the test suite proves it against more than 60,000 cases taken from rut.ts itself. No dependencies.
 
 ```bash
 go get github.com/arrowsw/rut.go
@@ -88,7 +88,9 @@ Go strings may also hold bytes that are not valid UTF-8, which JavaScript string
 
 ## How parity with rut.ts is verified
 
-- **Golden fixture.** [`scripts/golden/generate.mjs`](scripts/golden/generate.mjs) runs the pinned rut.ts release from npm over a reproducible corpus of 44,524 inputs and 8,000 pairs, and stores every answer in [`testdata/golden.json.gz`](testdata). [`golden_test.go`](golden_test.go) replays all of them against the Go port. The corpus covers every ASCII and Latin-1 character, Unicode spaces, zero-width characters, other digit systems, look-alikes of `K` and characters outside the BMP, placed before, after and inside RUTs. It also covers the 64-unit cap from both sides, random strings, and mutated valid and wrong RUTs. Before it was committed, each of the three JavaScript traps above was put into the code on purpose, and the fixture caught each one.
+- **Golden fixture.** [`scripts/golden/generate.mjs`](scripts/golden/generate.mjs) runs the pinned rut.ts release from npm over a reproducible corpus of 48,537 inputs and 11,000 pairs, and stores every answer in [`testdata/golden.json.gz`](testdata). [`golden_test.go`](golden_test.go) replays all of them against the Go port. The corpus covers every ASCII and Latin-1 character, Unicode spaces, zero-width characters, other digit systems, look-alikes of `K` and characters outside the BMP, placed before, after and inside RUTs. It also covers the 64-unit cap from both sides, every body one digit away from a repeated-digit one, random strings, mutated valid and wrong RUTs, and pairs that differ only in the verifier or in one digit. Before it was committed, each of the three JavaScript traps above was put into the code on purpose, and the fixture caught each one.
+- **Generate.** The fixture also records what rut.ts's `generate()` returns in 3,000 calls when its random source is replaced by a fixed stream of draws, with draws at both ends of each range, biased draws and draws that land on repeated-digit bodies among them. The Go test feeds the same stream to `Generate` and requires the same RUTs from the same draws.
+- **Patterns.** The fixture stores rut.ts's `RUT_PATTERN`, and the test requires the `Pattern` constants to match it.
 - **CI** regenerates the fixture from the pinned rut.ts and fails if it is stale.
 - **Fuzz tests** ([`fuzz_test.go`](fuzz_test.go)) check the rules that tie the functions together on any input, invalid UTF-8 included.
 - **Unit tests** port the cases of the rut.ts test suite, plus the JavaScript-specific ones.

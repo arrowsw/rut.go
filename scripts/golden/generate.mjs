@@ -5,6 +5,9 @@
 //   npm ci && node generate.mjs           # rewrite the fixture
 //   npm ci && node generate.mjs --check   # fail if the fixture is stale
 //
+// It also records rut.ts's RUT_PATTERN, and what generate() returns when its
+// random source is replaced by a fixed stream of draws.
+//
 // The corpus comes from a seeded PRNG, so every run produces the same file.
 // It never contains lone UTF-16 surrogates: JSON cannot carry them to Go,
 // whose decoder would replace them with U+FFFD.
@@ -90,14 +93,22 @@ for (const base of ['12.345.678-5', '12345678-5', '123456785', '9.068.826-K']) {
 }
 for (const c of specials) add(`12${c}345${c}678`) // CalculateVerifier separators
 
-// 3. The 64-unit cap, approached from both sides with one- and two-unit pads.
+// 3. The 64-unit cap, approached from both sides with one- and two-unit pads,
+// the code points at the edges of the counting rule included.
+const capPads = [
+  ' ', '\u{a0}', '0', '\u{3000}', '\u{feff}', 'x', '.', '\u{1f600}',
+  '\u{fffd}', '\u{fffe}', '\u{ffff}', '\u{10000}', '\u{10ffff}',
+]
 for (const base of ['123456785', '12.345.678-5', '12345678']) {
-  for (const pad of [' ', '\u{a0}', '0', '\u{3000}', '\u{feff}', 'x', '.', '\u{1f600}']) {
+  for (const pad of capPads) {
     for (let total = 60; total <= 68; total++) {
       const n = Math.ceil((total - base.length) / pad.length)
       add(pad.repeat(n) + base)
       add(base + pad.repeat(n))
       add(pad.repeat(Math.floor(n / 2)) + base + pad.repeat(Math.ceil(n / 2)))
+      // Exactly `total` units: two-unit pads topped up with a space.
+      const exact = pad.repeat(Math.floor((total - base.length) / pad.length))
+      add(exact + ' '.repeat(total - base.length - exact.length) + base)
     }
   }
 }
@@ -134,6 +145,24 @@ for (let i = 0; i < 5000; i++) {
   let s = '0'.repeat(int(3) === 0 ? int(4) : 0)
   for (let n = 4 + int(7); n > 0; n--) s += String(int(10)) + pick(separators)
   add(s)
+}
+
+// 7. Repeated-digit bodies and every body one digit away from one, for strict
+// mode.
+for (const n of [7, 8]) {
+  for (let d = 1; d <= 9; d++) {
+    const repeated = String(d).repeat(n)
+    const bodies = [repeated]
+    for (let i = 0; i < n; i++) {
+      for (let r = i === 0 ? 1 : 0; r <= 9; r++) {
+        if (r !== d) bodies.push(repeated.slice(0, i) + r + repeated.slice(i + 1))
+      }
+    }
+    for (const body of bodies) {
+      const verifier = rut.calculateVerifier(body)
+      for (const shape of SHAPES) add(spell({ body, verifier }, shape))
+    }
+  }
 }
 
 // --- Answers ---
@@ -195,6 +224,77 @@ for (let i = 0; i < 8000; i++) {
   }
   pairs.push([a, b, flags(rut.equals(a, b), rut.equals(a, b, { requireValid: false }))])
 }
+// Near misses: a RUT against the same body with another verifier, against a
+// body one digit away, and against itself padded to 64 or 65 units.
+const verifiers = [...'0123456789K']
+for (let i = 0; i < 3000; i++) {
+  const r = seededRut(pick([7, 8]))
+  const a = respell(r)
+  let b
+  if (i % 3 === 0) {
+    b = respell({ body: r.body, verifier: pick(verifiers.filter((v) => v !== r.verifier)) })
+  } else if (i % 3 === 1) {
+    const at = int(r.body.length)
+    const digit = pick([...'0123456789'].filter((c) => c !== r.body[at] && !(at === 0 && c === '0')))
+    const body = r.body.slice(0, at) + digit + r.body.slice(at + 1)
+    b = respell({ body, verifier: random() < 0.5 ? r.verifier : rut.calculateVerifier(body) })
+  } else {
+    b = ' '.repeat(64 - a.length + int(2)) + a
+  }
+  pairs.push([a, b, flags(rut.equals(a, b), rut.equals(a, b, { requireValid: false }))])
+}
+
+// --- generate(), fed a fixed stream of random draws ---
+// rut.ts draws every body from globalThis.crypto.getRandomValues. Replacing it
+// with a seeded stream lets the Go test replay the same draws and compare every
+// RUT. Besides plain draws, the stream holds draws at both ends of each body
+// range, biased draws that must be discarded, and draws that land on
+// repeated-digit bodies, which must be drawn again.
+const UINT32_RANGE = 2 ** 32
+const edgeDraws = []
+for (const [lo, hi] of [[1000000, 9999999], [10000000, 99999999]]) {
+  const span = hi - lo + 1
+  const maxUnbiased = Math.floor(UINT32_RANGE / span) * span
+  edgeDraws.push(0, 1, span - 2, span - 1, span, span + 1)
+  edgeDraws.push(maxUnbiased - 2, maxUnbiased - 1, maxUnbiased, maxUnbiased + 1, UINT32_RANGE - 1)
+  for (let d = 1; d <= 9; d++) {
+    const offset = Number(String(d).repeat(String(lo).length)) - lo
+    edgeDraws.push(offset, offset + span * (1 + int(40)))
+  }
+}
+const stream = Array.from({ length: 20000 }, () =>
+  random() < 0.3 ? pick(edgeDraws) : Math.floor(random() * UINT32_RANGE),
+)
+
+const realCrypto = Object.getOwnPropertyDescriptor(globalThis, 'crypto')
+let used = 0
+Object.defineProperty(globalThis, 'crypto', {
+  configurable: true,
+  value: {
+    getRandomValues(buffer) {
+      if (buffer.length !== 1 || used >= stream.length) throw new Error('unexpected draw from rut.ts')
+      buffer[0] = stream[used++]
+      return buffer
+    },
+  },
+})
+const generateCalls = []
+for (let round = 0; round < 20; round++) {
+  for (const bodyLength of [undefined, 7, 8, 6, 9, 0]) {
+    for (const format of [undefined, 'dotted', 'compact', 'hyphen', 'spaced']) {
+      for (const count of [undefined, 1, 3, 0, -1]) {
+        const options = {}
+        if (bodyLength !== undefined) options.bodyLength = bodyLength
+        if (format !== undefined) options.format = format
+        if (count !== undefined) options.count = count
+        generateCalls.push([bodyLength ?? null, format ?? null, count ?? null, rut.generate(options)])
+      }
+    }
+  }
+}
+Object.defineProperty(globalThis, 'crypto', realCrypto)
+if (used === 0) throw new Error('rut.ts generate() did not use the replaced random source')
+const draws = stream.slice(0, used)
 
 const json =
   JSON.stringify({
@@ -202,9 +302,14 @@ const json =
     seed: SEED,
     fields: ['input', 'clean', 'calculateVerifier', 'format', 'formatNoDots', 'mask', 'isRutLike|validate|strict'],
     pairFields: ['a', 'b', 'equals|equalsShapeOnly'],
+    generateFields: ['bodyLength', 'format', 'count', 'result'],
     cases,
     pairs,
+    patterns: rut.RUT_PATTERN,
+    generate: { draws, calls: generateCalls },
   }) + '\n'
+
+const summary = `rut.ts ${version}, ${cases.length} inputs, ${pairs.length} pairs, ${generateCalls.length} generate() calls`
 
 if (process.argv.includes('--check')) {
   const committed = gunzipSync(readFileSync(OUT)).toString('utf8')
@@ -212,8 +317,8 @@ if (process.argv.includes('--check')) {
     console.error('testdata/golden.json.gz is stale: run `node generate.mjs` in scripts/golden.')
     process.exit(1)
   }
-  console.log(`golden fixture is up to date (rut.ts ${version}, ${cases.length} inputs, ${pairs.length} pairs)`)
+  console.log(`golden fixture is up to date (${summary})`)
 } else {
   writeFileSync(OUT, gzipSync(json, { level: 9 }))
-  console.log(`wrote golden fixture (rut.ts ${version}, ${cases.length} inputs, ${pairs.length} pairs)`)
+  console.log(`wrote golden fixture (${summary})`)
 }
