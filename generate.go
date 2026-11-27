@@ -3,6 +3,7 @@ package rut
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"strconv"
 )
@@ -45,6 +46,10 @@ func WithFormat(f GenerateFormat) GenerateOption {
 //
 // Generated RUTs cover the real RUT range, so any one of them may belong to a
 // real person: use them as test data, not as published sample identities.
+//
+// If crypto/rand fails to return random bytes, Generate panics with an error
+// rather than return a RUT that is not random. crypto/rand documents that its
+// operating-system sources do not fail, except on legacy Linux systems.
 func Generate(opts ...GenerateOption) string {
 	return generateOne(rand.Reader, collectGenerateOptions(opts))
 }
@@ -53,6 +58,8 @@ func Generate(opts ...GenerateOption) string {
 // an empty slice when n is zero or negative.
 //
 // There is no upper limit: if n comes from user input, cap it before calling.
+// GenerateN allocates all n results at once, so a count too large to allocate
+// panics, as make does. It also panics, like Generate, if crypto/rand fails.
 func GenerateN(n int, opts ...GenerateOption) []string {
 	return generateN(rand.Reader, n, collectGenerateOptions(opts))
 }
@@ -102,15 +109,15 @@ func generateOne(r io.Reader, o generateOptions) string {
 
 // randomIntInclusive draws a uniform integer in [lo, hi] from r. Draws in the
 // top of the uint32 range that would bias the result are discarded and
-// redrawn, as in rut.ts. It panics if r fails, which crypto/rand.Reader does
-// not do in practice.
+// redrawn, as in rut.ts. It panics with an error wrapping the read error if r
+// fails, which crypto/rand.Reader does not do in practice.
 func randomIntInclusive(r io.Reader, lo, hi int) int {
 	span := uint64(hi - lo + 1)
 	maxUnbiased := (1 << 32) / span * span
 	var buf [4]byte
 	for {
 		if _, err := io.ReadFull(r, buf[:]); err != nil {
-			panic("rut: reading random bytes: " + err.Error())
+			panic(fmt.Errorf("rut: reading random bytes: %w", err))
 		}
 		if v := uint64(binary.LittleEndian.Uint32(buf[:])); v < maxUnbiased {
 			return lo + int(v%span)

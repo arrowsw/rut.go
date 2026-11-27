@@ -3,6 +3,9 @@ package rut
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"io"
+	"math"
 	"regexp"
 	"testing"
 )
@@ -190,11 +193,21 @@ func TestRandomIntInclusiveRejectsBiasedDraws(t *testing.T) {
 	}
 }
 
-func TestRandomIntInclusivePanicsWhenTheSourceFails(t *testing.T) {
+func TestRandomIntInclusivePanicsWithAnErrorWhenTheSourceFails(t *testing.T) {
 	defer func() {
-		if recover() == nil {
-			t.Error("randomIntInclusive did not panic on an empty source")
+		err, ok := recover().(error)
+		if !ok || !errors.Is(err, io.EOF) {
+			t.Errorf("panic value = %#v, want an error wrapping io.EOF", err)
 		}
 	}()
 	randomIntInclusive(&bytes.Buffer{}, 1, 10)
+}
+
+func TestGenerateNPanicsOnACountTooLargeToAllocate(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("GenerateN(math.MaxInt) did not panic")
+		}
+	}()
+	GenerateN(math.MaxInt)
 }
