@@ -46,7 +46,7 @@ func WithFormat(f GenerateFormat) GenerateOption {
 // Generated RUTs cover the real RUT range, so any one of them may belong to a
 // real person: use them as test data, not as published sample identities.
 func Generate(opts ...GenerateOption) string {
-	return generateOne(collectGenerateOptions(opts))
+	return generateOne(rand.Reader, collectGenerateOptions(opts))
 }
 
 // GenerateN returns n random valid RUTs, configured like Generate. It returns
@@ -54,15 +54,7 @@ func Generate(opts ...GenerateOption) string {
 //
 // There is no upper limit: if n comes from user input, cap it before calling.
 func GenerateN(n int, opts ...GenerateOption) []string {
-	o := collectGenerateOptions(opts)
-	if n < 0 {
-		n = 0
-	}
-	ruts := make([]string, n)
-	for i := range ruts {
-		ruts[i] = generateOne(o)
-	}
-	return ruts
+	return generateN(rand.Reader, n, collectGenerateOptions(opts))
 }
 
 func collectGenerateOptions(opts []GenerateOption) generateOptions {
@@ -75,14 +67,27 @@ func collectGenerateOptions(opts []GenerateOption) generateOptions {
 	return o
 }
 
-func generateOne(o generateOptions) string {
+// generateN and generateOne take the random source as a parameter so that
+// tests can feed them a fixed stream of draws.
+func generateN(r io.Reader, n int, o generateOptions) []string {
+	if n < 0 {
+		n = 0
+	}
+	ruts := make([]string, n)
+	for i := range ruts {
+		ruts[i] = generateOne(r, o)
+	}
+	return ruts
+}
+
+func generateOne(r io.Reader, o generateOptions) string {
 	lo, hi := 10000000, 99999999
 	if o.bodyLength == 7 {
 		lo, hi = 1000000, 9999999
 	}
-	body := strconv.Itoa(randomIntInclusive(rand.Reader, lo, hi))
+	body := strconv.Itoa(randomIntInclusive(r, lo, hi))
 	for isSuspicious(body) {
-		body = strconv.Itoa(randomIntInclusive(rand.Reader, lo, hi))
+		body = strconv.Itoa(randomIntInclusive(r, lo, hi))
 	}
 	verifier := calculateVerifierForBody(body)
 	switch o.format {
