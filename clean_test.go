@@ -98,6 +98,37 @@ func TestCleanCapsInputAt64UTF16Units(t *testing.T) {
 	wantInvalid(t, "65 units with emoji", err)
 }
 
+func TestCleanCountsUnitsAtTheCapEdges(t *testing.T) {
+	// Each pad is repeated, and topped up with spaces, to exactly 64 units;
+	// one more space must take the input over the cap.
+	cases := []struct {
+		name  string
+		pad   string
+		units int
+	}{
+		{"last BMP character", "\uffff", 1},
+		{"replacement character", "\ufffd", 1},
+		{"first character outside the BMP", "\U00010000", 2},
+		{"last code point", "\U0010ffff", 2},
+		// Go strings can hold bytes that are not UTF-8, which JavaScript strings
+		// cannot. Each such byte counts as one unit.
+		{"invalid byte", "\xff", 1},
+		{"truncated 3-byte sequence", "\xe2\x82", 2},
+		{"UTF-8-encoded surrogate", "\xed\xa0\x80", 3},
+	}
+	const want = "123456785"
+	for _, c := range cases {
+		room := maxInputLength - len(want)
+		n := room / c.units
+		atCap := strings.Repeat(c.pad, n) + strings.Repeat(" ", room-n*c.units) + want
+		if got, err := Clean(atCap); err != nil || got != want {
+			t.Errorf("%s, 64 units: got %q, %v; want %q, nil", c.name, got, err, want)
+		}
+		_, err := Clean(" " + atCap)
+		wantInvalid(t, c.name+", 65 units", err)
+	}
+}
+
 func TestCleanIsIdempotent(t *testing.T) {
 	for _, in := range []string{"12.345.678-5", "14.625.621-k", "009.068.826-K", " 12 345 6 78 - 9 ", "(18.972.631-7)"} {
 		once, err := Clean(in)
