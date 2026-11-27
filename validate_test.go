@@ -198,6 +198,29 @@ func TestValidateStrictRejectsRepeatedDigitPlaceholders(t *testing.T) {
 	}
 }
 
+func TestValidateStrictAcceptsBodiesOneDigitFromRepeated(t *testing.T) {
+	// Strict mode rejects only bodies whose digits are all the same: changing
+	// any one digit of such a body, the first and the last included, makes it
+	// pass.
+	for _, n := range []int{7, 8} {
+		for d := byte('1'); d <= '9'; d++ {
+			for i := 0; i < n; i++ {
+				body := []byte(strings.Repeat(string(d), n))
+				body[i] = '1' + (d-'0')%9 // another nonzero digit
+				in := string(body) + calculateVerifierForBody(string(body))
+				if !Validate(in, WithStrict(true)) {
+					t.Errorf("Validate(%q, WithStrict(true)) = false, want true", in)
+				}
+			}
+		}
+	}
+	for _, in := range []string{"1.011.111-0", "11.111.112-K"} {
+		if !Validate(in, WithStrict(true)) {
+			t.Errorf("Validate(%q, WithStrict(true)) = false, want true", in)
+		}
+	}
+}
+
 func TestValidateLastOptionWins(t *testing.T) {
 	if Validate("11.111.111-1", WithStrict(false), WithStrict(true)) {
 		t.Error("the later WithStrict(true) should win")
